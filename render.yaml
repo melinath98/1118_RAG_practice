@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: rag-doc-qa
+    runtime: python
+    plan: standard          # torch + 嵌入模型需要 1GB 以上記憶體,free/starter(512MB)會被終止
+    buildCommand: pip install -r requirements.txt
+    startCommand: python app.py
+    healthCheckPath: /healthz
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9
+      - key: GROQ_API_KEY
+        sync: false         # 在 Render 後台填入(選填)
+      - key: EMBED_MODEL
+        value: intfloat/multilingual-e5-small

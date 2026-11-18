@@ -1,0 +1,13 @@
+--extra-index-url https://download.pytorch.org/whl/cpu
+gradio>=5.0,<6.0
+fastapi
+uvicorn
+pillow
+groq
+pypdf
+python-docx
+numpy
+scikit-learn
+chromadb
+torch
+sentence-transformers
