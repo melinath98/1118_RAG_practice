@@ -333,36 +333,40 @@ THEME = gr.themes.Soft(primary_hue="emerald", neutral_hue="slate", radius_size="
 
 
 # ═══ Gradio 事件 ═══
-def make_rag():
-    return RAG()
+def ensure_rag(rag):
+    """State 初始值為 None(或非 RAG 物件)時,建立新的工作階段"""
+    return rag if isinstance(rag, RAG) else RAG()
 
 
 def on_key(key, cur, rag):
+    rag = ensure_rag(rag)
     effective = (key or "").strip() or GROQ_KEY
     rag.set_key(effective)
-    if not effective: return "⚠ 未設定 Key", gr.update()
+    if not effective: return "⚠ 未設定 Key", gr.update(), rag
     ms = rag.list_models()
-    if not ms: return "✗ Key 無效或無法取得模型", gr.update()
+    if not ms: return "✗ Key 無效或無法取得模型", gr.update(), rag
     src = "" if (key or "").strip() else "（伺服器預設）"
     return f"✓ Key 有效{src} · {len(ms)} 個模型", gr.update(
-        choices=ms, value=cur if cur in ms else (MODELS[0] if MODELS[0] in ms else ms[0]))
+        choices=ms, value=cur if cur in ms else (MODELS[0] if MODELS[0] in ms else ms[0])), rag
 
 
 def on_upload(f, rag):
-    if f is None: return "⚠ 請選擇檔案"
+    rag = ensure_rag(rag)
+    if f is None: return "⚠ 請選擇檔案", rag
     if _CORE is None: gr.Info("首次使用需載入嵌入模型，請稍候…")
-    return rag.load(f if isinstance(f, str) else f.name)
+    return rag.load(f if isinstance(f, str) else f.name), rag
 
 
 def on_ask(q, history, records, strategy, k, model, rag):
+    rag = ensure_rag(rag)
     q = (q or "").strip()
-    if not q: return "", history, gr.update(), records
+    if not q: return "", history, gr.update(), records, rag
     ans, src = rag.answer(q, strategy, k, model)
     records = records + [{"時間": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "文件": rag.name, "問題": q,
                           "回答": re.sub(r"\n*<sub>.*?</sub>", "", ans, flags=re.S).strip(),
                           "策略": STRATEGIES[strategy][0], "模型": rag.model,
                           "參考片段": src.split("─" * 40, 1)[-1].strip()}]
-    return "", history + [{"role": "user", "content": q}, {"role": "assistant", "content": ans}], src, records
+    return "", history + [{"role": "user", "content": q}, {"role": "assistant", "content": ans}], src, records, rag
 
 
 # ── 匯出：Word / CSV ──
@@ -418,7 +422,8 @@ _boot = RAG()  # 僅用來在啟動時取得模型清單(有伺服器預設 Key 
 init_models = _boot.list_models() or MODELS
 
 with gr.Blocks(title="RAG 文件問答", theme=THEME, css=CSS, head=HEAD) as demo:
-    rag_state = gr.State(make_rag, delete_callback=lambda r: r.cleanup(), time_to_live=6 * 3600)
+    rag_state = gr.State(None, delete_callback=lambda r: r.cleanup() if isinstance(r, RAG) else None,
+                         time_to_live=6 * 3600)
     records = gr.State([])
 
     gr.HTML("<div id='hdr'><h1>📚 RAG 文件問答</h1><p>上傳 PDF / DOCX，選擇檢索策略，直接提問 · Groq × ChromaDB</p></div>")
@@ -451,16 +456,17 @@ with gr.Blocks(title="RAG 文件問答", theme=THEME, css=CSS, head=HEAD) as dem
                 btn_csv = gr.Button("📊 匯出 CSV", size="sm", scale=1, elem_classes="tap")
             out_file = gr.File(label="下載檔案", visible=False)
 
-    key.submit(on_key, [key, model, rag_state], [key_status, model])
-    key.blur(on_key, [key, model, rag_state], [key_status, model])
-    file.upload(on_upload, [file, rag_state], status)
+    key.submit(on_key, [key, model, rag_state], [key_status, model, rag_state])
+    key.blur(on_key, [key, model, rag_state], [key_status, model, rag_state])
+    file.upload(on_upload, [file, rag_state], [status, rag_state])
     strategy.change(lambda s: f"<small>{STRATEGIES[s][1]}</small>", strategy, desc)
     for ev in (q.submit, send.click):
-        ev(on_ask, [q, chat, records, strategy, topk, model, rag_state], [q, chat, src, records])
+        ev(on_ask, [q, chat, records, strategy, topk, model, rag_state], [q, chat, src, records, rag_state])
     clear.click(lambda: ([], "", [], gr.update(value=None, visible=False)), None, [chat, src, records, out_file])
     show = lambda p: gr.update(value=p, visible=bool(p))
     btn_docx.click(lambda r, w: show(export_docx(r, w)), [records, with_src], out_file)
     btn_csv.click(lambda r: show(export_csv(r)), records, out_file)
+    demo.load(ensure_rag, rag_state, rag_state)
 
 demo.queue(max_size=20, default_concurrency_limit=2)
 
